@@ -1,7 +1,9 @@
 <?php
 /**
  * ACF (Advanced Custom Fields) module — exposes ACF field groups, field
- * definitions and per-post field values as AI tools.
+ * definitions and field values (posts, users, terms, options pages) as
+ * read-only AI tools. The write tools live in Goldnat for ACF — Pro
+ * (goldt-webmcp-acf-pro) since 1.2.0, under the same `acf.*` names.
  *
  * @package GoldtWebMCP\ACF
  */
@@ -218,93 +220,6 @@ class ACF_Module extends Module_Base {
 			$this->register_tool( 'getOptionsPageFields', $options_tool );
 			$this->manifest = $manifest;
 		}
-
-		// ── Writes (pro) ──
-		$this->register_tool(
-			'updateFieldValue',
-			array(
-				'description'    => 'Set the value of an ACF field on a post.',
-				'input_schema'   => array(
-					'type'       => 'object',
-					'required'   => array( 'post_id', 'selector', 'value' ),
-					'properties' => array(
-						'post_id'  => array( 'type' => 'integer' ),
-						'selector' => array( 'type' => 'string' ),
-						'value'    => array(),
-					),
-				),
-				'required_scope' => 'write',
-			)
-		);
-		$this->register_tool(
-			'deleteFieldValue',
-			array(
-				'description'    => 'Delete an ACF field value from a post.',
-				'input_schema'   => array(
-					'type'       => 'object',
-					'required'   => array( 'post_id', 'selector' ),
-					'properties' => array(
-						'post_id'  => array( 'type' => 'integer' ),
-						'selector' => array( 'type' => 'string' ),
-					),
-				),
-				'required_scope' => 'write',
-			)
-		);
-		$this->register_tool(
-			'createFieldGroup',
-			array(
-				'description'    => 'Create a new ACF field group.',
-				'input_schema'   => array(
-					'type'       => 'object',
-					'required'   => array( 'title' ),
-					'properties' => array(
-						'title'    => array( 'type' => 'string' ),
-						'location' => array(
-							'type'        => 'array',
-							'description' => 'ACF location rules; default: all posts',
-						),
-					),
-				),
-				'required_scope' => 'write',
-			)
-		);
-		$this->register_tool(
-			'addField',
-			array(
-				'description'    => 'Add a field to an existing field group.',
-				'input_schema'   => array(
-					'type'       => 'object',
-					'required'   => array( 'group_key', 'label', 'name', 'type' ),
-					'properties' => array(
-						'group_key' => array( 'type' => 'string' ),
-						'label'     => array( 'type' => 'string' ),
-						'name'      => array( 'type' => 'string' ),
-						'type'      => array(
-							'type'        => 'string',
-							'description' => 'text | textarea | number | select | true_false | image | wysiwyg …',
-						),
-					),
-				),
-				'required_scope' => 'write',
-			)
-		);
-		$this->register_tool(
-			'updateFieldGroup',
-			array(
-				'description'    => 'Update a field group title / active state.',
-				'input_schema'   => array(
-					'type'       => 'object',
-					'required'   => array( 'group_key' ),
-					'properties' => array(
-						'group_key' => array( 'type' => 'string' ),
-						'title'     => array( 'type' => 'string' ),
-						'active'    => array( 'type' => 'boolean' ),
-					),
-				),
-				'required_scope' => 'write',
-			)
-		);
 	}
 
 	/**
@@ -369,19 +284,6 @@ class ACF_Module extends Module_Base {
 	 */
 	private function require_acf_admin() {
 		return $this->require_cap( \acf_get_setting( 'capability' ) );
-	}
-
-	/**
-	 * Writes to a post's field values require edit_post on that post (SEC-00).
-	 *
-	 * @param int $id Post ID.
-	 * @return \WP_Error|null
-	 */
-	private function require_edit_post( $id ) {
-		if ( ! \current_user_can( 'edit_post', $id ) ) {
-			return new \WP_Error( 'forbidden', 'edit_post capability required for this post', array( 'status' => 403 ) );
-		}
-		return null;
 	}
 
 	/**
@@ -790,176 +692,6 @@ class ACF_Module extends Module_Base {
 			array(
 				'results' => $out,
 				'count'   => count( $out ),
-			)
-		);
-	}
-
-	/**
-	 * Tool handler for `acf.updateFieldValue`.
-	 *
-	 * @param array $params Validated tool input.
-	 * @return array|\WP_Error
-	 */
-	public function execute_updateFieldValue( $params ) {
-		$id = $this->require_post( $params );
-		if ( \is_wp_error( $id ) ) {
-			return $id;
-		}
-		$deny = $this->require_edit_post( $id );
-		if ( $deny ) {
-			return $deny;
-		}
-		$selector = \sanitize_text_field( $params['selector'] ?? '' );
-		if ( '' === $selector ) {
-			return new \WP_Error( 'missing_parameter', 'selector required', array( 'status' => 400 ) );
-		}
-		$ok = \update_field( $selector, $params['value'] ?? '', $id );
-		return $this->success_response(
-			array(
-				'post_id'  => $id,
-				'selector' => $selector,
-				'updated'  => (bool) $ok,
-			)
-		);
-	}
-
-	/**
-	 * Tool handler for `acf.deleteFieldValue`.
-	 *
-	 * @param array $params Validated tool input.
-	 * @return array|\WP_Error
-	 */
-	public function execute_deleteFieldValue( $params ) {
-		$id = $this->require_post( $params );
-		if ( \is_wp_error( $id ) ) {
-			return $id;
-		}
-		$deny = $this->require_edit_post( $id );
-		if ( $deny ) {
-			return $deny;
-		}
-		$selector = \sanitize_text_field( $params['selector'] ?? '' );
-		$ok       = \delete_field( $selector, $id );
-		return $this->success_response(
-			array(
-				'post_id'  => $id,
-				'selector' => $selector,
-				'deleted'  => (bool) $ok,
-			)
-		);
-	}
-
-	/**
-	 * Tool handler for `acf.createFieldGroup`.
-	 *
-	 * @param array $params Validated tool input.
-	 * @return array|\WP_Error
-	 */
-	public function execute_createFieldGroup( $params ) {
-		$deny = $this->require_cap( 'manage_options' );
-		if ( $deny ) {
-			return $deny;
-		}
-		$title = \sanitize_text_field( $params['title'] ?? '' );
-		if ( '' === $title ) {
-			return new \WP_Error( 'missing_parameter', 'title required', array( 'status' => 400 ) );
-		}
-		if ( ! function_exists( 'acf_update_field_group' ) ) {
-			return new \WP_Error( 'not_available', 'ACF write API unavailable', array( 'status' => 501 ) );
-		}
-		$location = ( isset( $params['location'] ) && is_array( $params['location'] ) ) ? $params['location']
-			: array(
-				array(
-					array(
-						'param'    => 'post_type',
-						'operator' => '==',
-						'value'    => 'post',
-					),
-				),
-			);
-		$group    = \acf_update_field_group(
-			array(
-				'key'      => 'group_' . substr( md5( $title . microtime() ), 0, 13 ),
-				'title'    => $title,
-				'location' => $location,
-				'active'   => true,
-			)
-		);
-		return $this->success_response(
-			array(
-				'key'   => $group['key'] ?? '',
-				'title' => $title,
-			)
-		);
-	}
-
-	/**
-	 * Tool handler for `acf.addField`.
-	 *
-	 * @param array $params Validated tool input.
-	 * @return array|\WP_Error
-	 */
-	public function execute_addField( $params ) {
-		$deny = $this->require_cap( 'manage_options' );
-		if ( $deny ) {
-			return $deny;
-		}
-		if ( ! function_exists( 'acf_update_field' ) ) {
-			return new \WP_Error( 'not_available', 'ACF write API unavailable', array( 'status' => 501 ) );
-		}
-		$group_key = \sanitize_text_field( $params['group_key'] ?? '' );
-		if ( ! \acf_get_field_group( $group_key ) ) {
-			return new \WP_Error( 'group_not_found', 'Field group not found', array( 'status' => 404 ) );
-		}
-		$name  = \sanitize_key( $params['name'] ?? '' );
-		$field = \acf_update_field(
-			array(
-				'key'    => 'field_' . substr( md5( $name . microtime() ), 0, 13 ),
-				'label'  => \sanitize_text_field( $params['label'] ?? '' ),
-				'name'   => $name,
-				'type'   => \sanitize_key( $params['type'] ?? 'text' ),
-				'parent' => $group_key,
-			)
-		);
-		return $this->success_response(
-			array(
-				'key'       => $field['key'] ?? '',
-				'name'      => $name,
-				'group_key' => $group_key,
-			)
-		);
-	}
-
-	/**
-	 * Tool handler for `acf.updateFieldGroup`.
-	 *
-	 * @param array $params Validated tool input.
-	 * @return array|\WP_Error
-	 */
-	public function execute_updateFieldGroup( $params ) {
-		$deny = $this->require_cap( 'manage_options' );
-		if ( $deny ) {
-			return $deny;
-		}
-		if ( ! function_exists( 'acf_update_field_group' ) ) {
-			return new \WP_Error( 'not_available', 'ACF write API unavailable', array( 'status' => 501 ) );
-		}
-		$key   = \sanitize_text_field( $params['group_key'] ?? '' );
-		$group = \acf_get_field_group( $key );
-		if ( ! $group ) {
-			return new \WP_Error( 'group_not_found', 'Field group not found', array( 'status' => 404 ) );
-		}
-		if ( isset( $params['title'] ) ) {
-			$group['title'] = \sanitize_text_field( $params['title'] );
-		}
-		if ( isset( $params['active'] ) ) {
-			$group['active'] = ! empty( $params['active'] );
-		}
-		\acf_update_field_group( $group );
-		return $this->success_response(
-			array(
-				'key'     => $key,
-				'updated' => true,
 			)
 		);
 	}

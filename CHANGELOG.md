@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 — 2026-11-09
+
+- **Breaking: write tools moved to Goldnat for ACF — Pro** (`goldt-webmcp-acf-pro`, slug `acf-ai-connect-pro`). Removed from this free add-on: `acf.updateFieldValue`, `acf.deleteFieldValue`, `acf.createFieldGroup`, `acf.addField`, `acf.updateFieldGroup`. Install Goldnat for ACF — Pro 1.0.0+ to get them back under the same names (`acf.deleteFieldValue` now requires `confirm: true`).
+- Free is now read only: 10 tools (listFieldGroups, getFieldGroup, listFields, getFieldValue, getFieldsForPost, getFieldObject, searchByFieldValue, getUserFields, getTermFields, getOptionsPageFields — the last only with ACF PRO).
+
 ## 1.1.0 — 2026-11-09
 
 - New (Free, read): `acf.getUserFields` — all ACF field values for a user; per-user `edit_user` ceiling (SEC-00).

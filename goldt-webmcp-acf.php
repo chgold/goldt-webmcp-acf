@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Goldnat for ACF
  * Plugin URI: https://goldnat.ai/plugins/goldt-webmcp-acf
- * Description: Advanced Custom Fields integration for Goldnat — exposes ACF field groups, field definitions and per-post field values as AI tools via the Goldnat WebMCP Bridge.
- * Version: 1.1.0
+ * Description: Advanced Custom Fields integration for Goldnat — exposes ACF field groups, field definitions and field values (posts, users, terms, options pages) as read-only AI tools via the Goldnat WebMCP Bridge. Write tools: Goldnat for ACF — Pro.
+ * Version: 1.2.0
  * Author: chgold
  * Author URI: https://goldnat.ai/
  * License: Proprietary
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'GOLDTWMCP_ACF_VERSION', '1.1.0' );
+define( 'GOLDTWMCP_ACF_VERSION', '1.2.0' );
 define( 'GOLDTWMCP_ACF_PATH', plugin_dir_path( __FILE__ ) );
 
 /**
