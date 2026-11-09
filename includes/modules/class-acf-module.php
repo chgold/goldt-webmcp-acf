@@ -136,6 +136,21 @@ class ACF_Module extends Module_Base {
 		return $id;
 	}
 
+	/**
+	 * Per-object permission ceiling (SEC-00): the token's user must be able to
+	 * read this specific post natively (`read_post` — covers private posts of
+	 * others via read_private_posts, and drafts/pending via edit_post).
+	 *
+	 * @param int $id Post ID.
+	 * @return \WP_Error|null
+	 */
+	private function require_read_post( $id ) {
+		if ( ! \current_user_can( 'read_post', $id ) ) {
+			return new \WP_Error( 'forbidden', 'read_post capability required for this post', array( 'status' => 403 ) );
+		}
+		return null;
+	}
+
 	public function execute_listFieldGroups( $params ) {
 		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
 		$groups = \acf_get_field_groups();
@@ -185,6 +200,10 @@ class ACF_Module extends Module_Base {
 	public function execute_getFieldValue( $params ) {
 		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
 		$id = $this->require_post( $params ); if ( \is_wp_error( $id ) ) return $id;
+		$deny = $this->require_read_post( $id );
+		if ( $deny ) {
+			return $deny;
+		}
 		$selector = \sanitize_text_field( $params['selector'] ?? '' );
 		return $this->success_response( array( 'post_id' => $id, 'selector' => $selector, 'value' => \get_field( $selector, $id ) ) );
 	}
@@ -192,6 +211,10 @@ class ACF_Module extends Module_Base {
 	public function execute_getFieldsForPost( $params ) {
 		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
 		$id = $this->require_post( $params ); if ( \is_wp_error( $id ) ) return $id;
+		$deny = $this->require_read_post( $id );
+		if ( $deny ) {
+			return $deny;
+		}
 		$fields = \get_fields( $id );
 		return $this->success_response( array( 'post_id' => $id, 'fields' => is_array( $fields ) ? $fields : array() ) );
 	}
@@ -199,6 +222,10 @@ class ACF_Module extends Module_Base {
 	public function execute_getFieldObject( $params ) {
 		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
 		$id = $this->require_post( $params ); if ( \is_wp_error( $id ) ) return $id;
+		$deny = $this->require_read_post( $id );
+		if ( $deny ) {
+			return $deny;
+		}
 		$selector = \sanitize_text_field( $params['selector'] ?? '' );
 		$obj = \get_field_object( $selector, $id );
 		if ( ! $obj ) return new \WP_Error( 'field_not_found', 'Field not found', array( 'status' => 404 ) );
@@ -213,15 +240,33 @@ class ACF_Module extends Module_Base {
 		$field = \sanitize_text_field( $params['field_name'] ?? '' );
 		$value = $params['value'] ?? '';
 		$limit = \absint( $params['limit'] ?? 20 ) ?: 20;
-		$posts = \get_posts( array(
-			'post_type'  => ! empty( $params['post_type'] ) ? \sanitize_key( $params['post_type'] ) : 'any',
-			'numberposts' => $limit, 'post_status' => 'any',
-			'meta_key'   => $field, 'meta_value' => \sanitize_text_field( (string) $value ),
-		) );
-		$out = array();
-		foreach ( $posts as $p ) {
-			$out[] = array( 'post_id' => (int) $p->ID, 'title' => \get_the_title( $p ), 'type' => $p->post_type );
-		}
+		$out  = array();
+		$page = 1;
+		// Page through matches, dropping any post the user cannot read natively
+		// (SEC-00: never return — not even the title of — a non-readable post).
+		do {
+			$posts = \get_posts(
+				array(
+					'post_type'   => ! empty( $params['post_type'] ) ? \sanitize_key( $params['post_type'] ) : 'any',
+					'numberposts' => $limit,
+					'paged'       => $page,
+					'post_status' => 'any',
+					'meta_key'    => $field, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- unchanged query, now paged.
+					'meta_value'  => \sanitize_text_field( (string) $value ), // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				)
+			);
+			foreach ( $posts as $p ) {
+				if ( ! \current_user_can( 'read_post', $p->ID ) ) {
+					continue;
+				}
+				$out[] = array( 'post_id' => (int) $p->ID, 'title' => \get_the_title( $p ), 'type' => $p->post_type );
+				if ( count( $out ) >= $limit ) {
+					break 2;
+				}
+			}
+			++$page;
+			$fetched = count( $posts );
+		} while ( $fetched === $limit && $page <= 20 );
 		return $this->success_response( array( 'results' => $out, 'count' => count( $out ) ) );
 	}
 
