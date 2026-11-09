@@ -155,6 +155,70 @@ class ACF_Module extends Module_Base {
 			)
 		);
 
+		$this->register_tool(
+			'getUserFields',
+			array(
+				'description'    => 'Get all ACF field values for a WordPress user (key, name, label, type, value per field). Requires edit_user on that user.',
+				'input_schema'   => array(
+					'type'       => 'object',
+					'required'   => array( 'user_id' ),
+					'properties' => array(
+						'user_id' => array(
+							'type'        => 'integer',
+							'description' => 'WordPress user ID',
+						),
+					),
+				),
+				'required_scope' => 'read',
+			)
+		);
+		$this->register_tool(
+			'getTermFields',
+			array(
+				'description'    => 'Get all ACF field values for a taxonomy term (category, tag or custom taxonomy). Requires edit_term on that term.',
+				'input_schema'   => array(
+					'type'       => 'object',
+					'required'   => array( 'term_id' ),
+					'properties' => array(
+						'term_id'  => array(
+							'type'        => 'integer',
+							'description' => 'Term ID',
+						),
+						'taxonomy' => array(
+							'type'        => 'string',
+							'description' => 'Optional taxonomy slug; when given, the term must belong to it',
+						),
+					),
+				),
+				'required_scope' => 'read',
+			)
+		);
+		// Capability-Aware Manifest v1 (#803): options pages are an ACF PRO
+		// feature. The tool is always dispatchable (so a direct call returns
+		// 424) but is only advertised in the manifest when ACF PRO is active.
+		$options_tool = array(
+			'description'    => 'Get all ACF field values on an ACF PRO options page by its menu slug (key, name, label, type, value per field). Requires the options page capability.',
+			'input_schema'   => array(
+				'type'       => 'object',
+				'required'   => array( 'page_slug' ),
+				'properties' => array(
+					'page_slug' => array(
+						'type'        => 'string',
+						'description' => 'Options page menu_slug, e.g. theme-general-settings',
+					),
+				),
+			),
+			'required_scope' => 'read',
+		);
+		if ( $this->has_capability( 'acf_pro_options_pages' ) ) {
+			$this->register_tool( 'getOptionsPageFields', $options_tool );
+		} else {
+			$manifest       = $this->manifest;
+			$this->manifest = null;
+			$this->register_tool( 'getOptionsPageFields', $options_tool );
+			$this->manifest = $manifest;
+		}
+
 		// ── Writes (pro) ──
 		$this->register_tool(
 			'updateFieldValue',
@@ -318,6 +382,171 @@ class ACF_Module extends Module_Base {
 			return new \WP_Error( 'forbidden', 'edit_post capability required for this post', array( 'status' => 403 ) );
 		}
 		return null;
+	}
+
+	/**
+	 * Capability-Aware Manifest v1 (#803) — is an optional dependency present?
+	 *
+	 * @param string $key Stable capability key (`acf_pro_options_pages`).
+	 * @return bool
+	 */
+	public function has_capability( $key ) {
+		if ( 'acf_pro_options_pages' === $key ) {
+			return \function_exists( 'acf_is_pro' ) && \acf_is_pro()
+				&& \function_exists( 'acf_get_options_page' );
+		}
+		return false;
+	}
+
+	/**
+	 * Normalise ACF field objects to a list of key/name/label/type/value rows.
+	 *
+	 * @param array|false $objects Result of get_field_objects() or a list of field objects.
+	 * @return array
+	 */
+	private function field_rows( $objects ) {
+		$out = array();
+		foreach ( (array) $objects as $obj ) {
+			if ( ! is_array( $obj ) ) {
+				continue;
+			}
+			$out[] = array(
+				'key'   => $obj['key'] ?? '',
+				'name'  => $obj['name'] ?? '',
+				'label' => $obj['label'] ?? '',
+				'type'  => $obj['type'] ?? '',
+				'value' => $obj['value'] ?? null,
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Tool handler for `acf.getUserFields`.
+	 *
+	 * SEC-00: ACF shows user fields on the user-edit screen, so the ceiling is
+	 * the native per-user `edit_user` meta capability (own profile included).
+	 *
+	 * @param array $params Validated tool input.
+	 * @return array|\WP_Error
+	 */
+	public function execute_getUserFields( $params ) {
+		$id = \absint( $params['user_id'] ?? 0 );
+		if ( ! $id || ! \get_userdata( $id ) ) {
+			return new \WP_Error( 'user_not_found', 'User not found', array( 'status' => 404 ) );
+		}
+		if ( ! \current_user_can( 'edit_user', $id ) ) {
+			return new \WP_Error( 'forbidden', 'edit_user capability required for this user', array( 'status' => 403 ) );
+		}
+		$rows = $this->field_rows( \get_field_objects( 'user_' . $id ) );
+		return $this->success_response(
+			array(
+				'user_id' => $id,
+				'fields'  => $rows,
+				'count'   => count( $rows ),
+			)
+		);
+	}
+
+	/**
+	 * Tool handler for `acf.getTermFields`.
+	 *
+	 * SEC-00: ACF shows term fields on the term-edit screen, so the ceiling is
+	 * the native per-term `edit_term` meta capability.
+	 *
+	 * @param array $params Validated tool input.
+	 * @return array|\WP_Error
+	 */
+	public function execute_getTermFields( $params ) {
+		$id       = \absint( $params['term_id'] ?? 0 );
+		$taxonomy = ! empty( $params['taxonomy'] ) ? \sanitize_key( $params['taxonomy'] ) : '';
+		$term     = $id ? \get_term( $id, $taxonomy ) : null;
+		if ( ! $term || \is_wp_error( $term ) ) {
+			return new \WP_Error( 'term_not_found', 'Term not found', array( 'status' => 404 ) );
+		}
+		if ( ! \current_user_can( 'edit_term', $term->term_id ) ) {
+			return new \WP_Error( 'forbidden', 'edit_term capability required for this term', array( 'status' => 403 ) );
+		}
+		$rows = $this->field_rows( \get_field_objects( 'term_' . $term->term_id ) );
+		return $this->success_response(
+			array(
+				'term_id'  => (int) $term->term_id,
+				'taxonomy' => $term->taxonomy,
+				'name'     => $term->name,
+				'fields'   => $rows,
+				'count'    => count( $rows ),
+			)
+		);
+	}
+
+	/**
+	 * Tool handler for `acf.getOptionsPageFields` (ACF PRO only).
+	 *
+	 * SEC-00: the ceiling is the options page's own `capability` setting —
+	 * the same check ACF applies before rendering that admin page.
+	 *
+	 * @param array $params Validated tool input.
+	 * @return array|\WP_Error
+	 */
+	public function execute_getOptionsPageFields( $params ) {
+		if ( ! $this->has_capability( 'acf_pro_options_pages' ) ) {
+			return new \WP_Error( 'missing_dependency', 'ACF PRO (options pages) is not active on this site', array( 'status' => 424 ) );
+		}
+		$slug = \sanitize_text_field( $params['page_slug'] ?? '' );
+		$page = '' !== $slug ? \acf_get_options_page( $slug ) : false;
+		if ( ! $page || ! is_array( $page ) ) {
+			return new \WP_Error( 'options_page_not_found', 'Options page not found', array( 'status' => 404 ) );
+		}
+		$cap  = ! empty( $page['capability'] ) ? $page['capability'] : 'edit_posts';
+		$deny = $this->require_cap( $cap );
+		if ( $deny ) {
+			return $deny;
+		}
+		$post_id = ! empty( $page['post_id'] ) ? $page['post_id'] : 'options';
+		$objects = array();
+		foreach ( (array) \acf_get_field_groups() as $group ) {
+			if ( ! $this->group_targets_options_page( $group, $slug ) ) {
+				continue;
+			}
+			foreach ( (array) \acf_get_fields( $group ) as $field ) {
+				if ( empty( $field['key'] ) ) {
+					continue;
+				}
+				$obj = \get_field_object( $field['key'], $post_id );
+				if ( $obj ) {
+					$objects[] = $obj;
+				}
+			}
+		}
+		$rows = $this->field_rows( $objects );
+		return $this->success_response(
+			array(
+				'page_slug'  => $slug,
+				'page_title' => $page['page_title'] ?? '',
+				'post_id'    => $post_id,
+				'fields'     => $rows,
+				'count'      => count( $rows ),
+			)
+		);
+	}
+
+	/**
+	 * Does a field group have an `options_page == $slug` location rule?
+	 *
+	 * @param array  $group Field group array.
+	 * @param string $slug  Options page menu slug.
+	 * @return bool
+	 */
+	private function group_targets_options_page( $group, $slug ) {
+		foreach ( (array) ( $group['location'] ?? array() ) as $and_rules ) {
+			foreach ( (array) $and_rules as $rule ) {
+				if ( isset( $rule['param'], $rule['operator'], $rule['value'] )
+					&& 'options_page' === $rule['param'] && '==' === $rule['operator'] && $slug === $rule['value'] ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/**
