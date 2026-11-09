@@ -151,8 +151,31 @@ class ACF_Module extends Module_Base {
 		return null;
 	}
 
+	/**
+	 * Field-group / field-definition reads use ACF's own admin capability
+	 * (`acf_get_setting( 'capability' )`, default manage_options) — SEC-00.
+	 *
+	 * @return \WP_Error|null
+	 */
+	private function require_acf_admin() {
+		return $this->require_cap( \acf_get_setting( 'capability' ) );
+	}
+
+	/**
+	 * Writes to a post's field values require edit_post on that post (SEC-00).
+	 *
+	 * @param int $id Post ID.
+	 * @return \WP_Error|null
+	 */
+	private function require_edit_post( $id ) {
+		if ( ! \current_user_can( 'edit_post', $id ) ) {
+			return new \WP_Error( 'forbidden', 'edit_post capability required for this post', array( 'status' => 403 ) );
+		}
+		return null;
+	}
+
 	public function execute_listFieldGroups( $params ) {
-		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
+		$deny = $this->require_acf_admin(); if ( $deny ) return $deny;
 		$groups = \acf_get_field_groups();
 		$out = array();
 		foreach ( (array) $groups as $g ) {
@@ -167,7 +190,7 @@ class ACF_Module extends Module_Base {
 	}
 
 	public function execute_getFieldGroup( $params ) {
-		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
+		$deny = $this->require_acf_admin(); if ( $deny ) return $deny;
 		$key = \sanitize_text_field( $params['group_key'] ?? '' );
 		$group = \acf_get_field_group( $key );
 		if ( ! $group ) return new \WP_Error( 'group_not_found', 'Field group not found', array( 'status' => 404 ) );
@@ -183,7 +206,7 @@ class ACF_Module extends Module_Base {
 	}
 
 	public function execute_listFields( $params ) {
-		$deny = $this->require_cap( 'edit_posts' ); if ( $deny ) return $deny;
+		$deny = $this->require_acf_admin(); if ( $deny ) return $deny;
 		$key = \sanitize_text_field( $params['group_key'] ?? '' );
 		$fields = \acf_get_fields( $key );
 		if ( $fields === false ) return new \WP_Error( 'group_not_found', 'Field group not found', array( 'status' => 404 ) );
@@ -271,8 +294,11 @@ class ACF_Module extends Module_Base {
 	}
 
 	public function execute_updateFieldValue( $params ) {
-		$deny = $this->require_cap( 'edit_others_posts' ); if ( $deny ) return $deny;
 		$id = $this->require_post( $params ); if ( \is_wp_error( $id ) ) return $id;
+		$deny = $this->require_edit_post( $id );
+		if ( $deny ) {
+			return $deny;
+		}
 		$selector = \sanitize_text_field( $params['selector'] ?? '' );
 		if ( $selector === '' ) return new \WP_Error( 'missing_parameter', 'selector required', array( 'status' => 400 ) );
 		$ok = \update_field( $selector, $params['value'] ?? '', $id );
@@ -280,8 +306,11 @@ class ACF_Module extends Module_Base {
 	}
 
 	public function execute_deleteFieldValue( $params ) {
-		$deny = $this->require_cap( 'edit_others_posts' ); if ( $deny ) return $deny;
 		$id = $this->require_post( $params ); if ( \is_wp_error( $id ) ) return $id;
+		$deny = $this->require_edit_post( $id );
+		if ( $deny ) {
+			return $deny;
+		}
 		$selector = \sanitize_text_field( $params['selector'] ?? '' );
 		$ok = \delete_field( $selector, $id );
 		return $this->success_response( array( 'post_id' => $id, 'selector' => $selector, 'deleted' => (bool) $ok ) );
