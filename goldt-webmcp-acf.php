@@ -11,6 +11,7 @@
  * Requires PHP: 7.4
  * Requires Plugins: goldt-webmcp-bridge, advanced-custom-fields
  * Text Domain: goldt-webmcp-acf
+ *
  * @package GoldtWebMCP\ACF
  */
 
@@ -28,26 +29,36 @@ define( 'GOLDTWMCP_ACF_PATH', plugin_dir_path( __FILE__ ) );
  */
 function goldtwmcp_acf_check_dependencies() {
 	if ( ! defined( 'GOLDTWMCP_VERSION' ) ) {
-		add_action( 'admin_notices', function () {
-			echo '<div class="notice notice-error"><p><strong>Goldnat for ACF:</strong> Requires the free Goldnat WebMCP Bridge plugin.</p></div>';
-		} );
+		add_action(
+			'admin_notices',
+			function () {
+				echo '<div class="notice notice-error"><p><strong>Goldnat for ACF:</strong> Requires the free Goldnat WebMCP Bridge plugin.</p></div>';
+			}
+		);
 		return false;
 	}
 	if ( ! function_exists( 'acf_get_field_groups' ) ) {
-		add_action( 'admin_notices', function () {
-			echo '<div class="notice notice-error"><p><strong>Goldnat for ACF:</strong> Requires the Advanced Custom Fields plugin.</p></div>';
-		} );
+		add_action(
+			'admin_notices',
+			function () {
+				echo '<div class="notice notice-error"><p><strong>Goldnat for ACF:</strong> Requires the Advanced Custom Fields plugin.</p></div>';
+			}
+		);
 		return false;
 	}
 	return true;
 }
 
-add_action( 'plugins_loaded', function () {
-	if ( ! goldtwmcp_acf_check_dependencies() ) {
-		return;
-	}
-	add_action( 'goldtwmcp_register_modules', 'goldtwmcp_acf_register_modules' );
-}, 30 );
+add_action(
+	'plugins_loaded',
+	function () {
+		if ( ! goldtwmcp_acf_check_dependencies() ) {
+			return;
+		}
+		add_action( 'goldtwmcp_register_modules', 'goldtwmcp_acf_register_modules' );
+	},
+	30
+);
 
 /**
  * Instantiate + register the ACF module.
